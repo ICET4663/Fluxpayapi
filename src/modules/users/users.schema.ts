@@ -11,3 +11,8 @@ export const setPinSchema = z.object({
 export const setBiometricSchema = z.object({
   enabled: z.boolean(),
 });
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Enter your current password'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
