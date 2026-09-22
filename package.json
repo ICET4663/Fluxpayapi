@@ -7,7 +7,8 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "dev": "node --watch --env-file=.env src/server.ts",
+    "dev": "node --env-file=.env src/server.ts",
+    "dev:watch": "node --watch-path=./src --env-file=.env src/server.ts",
     "start": "node --env-file=.env src/server.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "promote-admin": "node --env-file=.env scripts/promoteAdmin.ts"
