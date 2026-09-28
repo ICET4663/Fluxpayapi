@@ -60,3 +60,41 @@ export function findDataPlan(id: string): DataPlan | undefined {
 export function findDisco(id: string) {
   return DISCOS.find((d) => d.id === id);
 }
+
+export const TV_PROVIDERS = ['dstv', 'gotv', 'startimes'] as const;
+export type TvProviderId = (typeof TV_PROVIDERS)[number];
+
+const TV_PROVIDER_LABELS: Record<TvProviderId, string> = {
+  dstv: 'DStv',
+  gotv: 'GOtv',
+  startimes: 'StarTimes',
+};
+
+export function tvProviderLabel(id: TvProviderId): string {
+  return TV_PROVIDER_LABELS[id];
+}
+
+export interface TvPackage {
+  id: string;
+  provider: TvProviderId;
+  name: string;
+  validity: string;
+  priceNaira: number;
+}
+
+export const TV_PACKAGES: TvPackage[] = [
+  { id: 'dstv-padi', provider: 'dstv', name: 'DStv Padi', validity: '30 days', priceNaira: 4400 },
+  { id: 'dstv-yanga', provider: 'dstv', name: 'DStv Yanga', validity: '30 days', priceNaira: 6000 },
+  { id: 'dstv-confam', provider: 'dstv', name: 'DStv Confam', validity: '30 days', priceNaira: 11000 },
+  { id: 'dstv-compact', provider: 'dstv', name: 'DStv Compact', validity: '30 days', priceNaira: 19000 },
+  { id: 'gotv-smallie', provider: 'gotv', name: 'GOtv Smallie', validity: '30 days', priceNaira: 1900 },
+  { id: 'gotv-jinja', provider: 'gotv', name: 'GOtv Jinja', validity: '30 days', priceNaira: 3900 },
+  { id: 'gotv-max', provider: 'gotv', name: 'GOtv Max', validity: '30 days', priceNaira: 6200 },
+  { id: 'startimes-nova', provider: 'startimes', name: 'StarTimes Nova', validity: '30 days', priceNaira: 1900 },
+  { id: 'startimes-basic', provider: 'startimes', name: 'StarTimes Basic', validity: '30 days', priceNaira: 3700 },
+  { id: 'startimes-smart', provider: 'startimes', name: 'StarTimes Smart', validity: '30 days', priceNaira: 4900 },
+];
+
+export function findTvPackage(id: string): TvPackage | undefined {
+  return TV_PACKAGES.find((p) => p.id === id);
+}

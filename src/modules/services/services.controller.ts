@@ -10,9 +10,13 @@ import {
   DISCOS,
   ELECTRICITY_CONVENIENCE_FEE_NAIRA,
   NETWORKS,
+  TV_PACKAGES,
+  TV_PROVIDERS,
   findDataPlan,
   findDisco,
+  findTvPackage,
   networkLabel,
+  tvProviderLabel,
 } from './services.catalog.ts';
 
 export const listCatalog = asyncHandler(async (_req: Request, res: Response) => {
@@ -21,6 +25,8 @@ export const listCatalog = asyncHandler(async (_req: Request, res: Response) => 
     dataPlans: DATA_PLANS,
     discos: DISCOS,
     electricityFee: ELECTRICITY_CONVENIENCE_FEE_NAIRA,
+    tvProviders: TV_PROVIDERS.map((id) => ({ id, name: tvProviderLabel(id) })),
+    tvPackages: TV_PACKAGES,
   });
 });
 
@@ -78,6 +84,26 @@ export const payElectricity = asyncHandler(async (req: Request, res: Response) =
     feeNaira: ELECTRICITY_CONVENIENCE_FEE_NAIRA,
     callProvider: (reference) =>
       mockVasProvider.payElectricity({ discoId, meterNumber, meterType, amountKobo: Math.round(total * 100), reference }),
+  });
+  res.status(201).json({ transaction: serializeTransaction(tx) });
+});
+
+export const payTv = asyncHandler(async (req: Request, res: Response) => {
+  const { provider, smartCardNumber, packageId, pin, idempotencyKey } = req.body;
+  const pkg = findTvPackage(packageId);
+  if (!pkg || pkg.provider !== provider) throw AppError.badRequest('Unknown package for this provider');
+
+  const tx = await purchaseService({
+    user: req.user!,
+    pin,
+    idempotencyKey,
+    category: 'tv',
+    title: `${tvProviderLabel(provider)} - ${pkg.name}`,
+    subtitle: smartCardNumber,
+    amountNaira: pkg.priceNaira,
+    feeNaira: pkg.priceNaira * AIRTIME_DATA_MARGIN_RATE,
+    callProvider: (reference) =>
+      mockVasProvider.payTv({ provider, smartCardNumber, packageId, amountKobo: Math.round(pkg.priceNaira * 100), reference }),
   });
   res.status(201).json({ transaction: serializeTransaction(tx) });
 });

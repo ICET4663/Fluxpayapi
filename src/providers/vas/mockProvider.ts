@@ -1,5 +1,5 @@
 import { generateReference } from '../../utils/money.ts';
-import type { BuyAirtimeInput, BuyDataInput, PayElectricityInput, ProviderResult, VasProvider } from './types.ts';
+import type { BuyAirtimeInput, BuyDataInput, PayElectricityInput, PayTvInput, ProviderResult, VasProvider } from './types.ts';
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,5 +36,17 @@ export const mockVasProvider: VasProvider = {
       return { success: false, providerReference: generateReference('MVAS'), message: 'Disco provider declined the request' };
     }
     return { success: true, providerReference: generateReference('MVAS'), message: `Meter ${input.meterNumber} recharged` };
+  },
+
+  async payTv(input: PayTvInput): Promise<ProviderResult> {
+    await delay(400 + Math.random() * 400);
+    if (shouldSimulateFailure(input.smartCardNumber)) {
+      return { success: false, providerReference: generateReference('MVAS'), message: 'TV provider declined the request' };
+    }
+    return {
+      success: true,
+      providerReference: generateReference('MVAS'),
+      message: `Subscription renewed for smart card ${input.smartCardNumber}`,
+    };
   },
 };

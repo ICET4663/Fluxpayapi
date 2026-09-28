@@ -27,9 +27,18 @@ export interface PayElectricityInput {
   reference: string;
 }
 
+export interface PayTvInput {
+  provider: string;
+  smartCardNumber: string;
+  packageId: string;
+  amountKobo: number;
+  reference: string;
+}
+
 export interface VasProvider {
   name: string;
   buyAirtime(input: BuyAirtimeInput): Promise<ProviderResult>;
   buyData(input: BuyDataInput): Promise<ProviderResult>;
   payElectricity(input: PayElectricityInput): Promise<ProviderResult>;
+  payTv(input: PayTvInput): Promise<ProviderResult>;
 }
