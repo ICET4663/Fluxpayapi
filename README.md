@@ -21,17 +21,22 @@ Node **22.18+** (it runs the TypeScript source directly — no build step in dev
 | Emails → Templates → **Confirm signup** | Replace the body with the OTP version below |
 | Emails → Templates → **Reset password** | Replace the body with the OTP version below |
 | Emails → SMTP Settings | **Enable custom SMTP** (see below) |
+| URL Configuration → **Site URL** | The frontend's login page, e.g. `http://localhost:5175/login` locally, `https://<your-domain>/login` in production |
 
 **Templates must contain `{{ .Token }}`** — that is the 6-digit code. Without it Supabase sends a link instead and the
 app's code screens have nothing to type.
 
-Confirm signup:
+Confirm signup — gives both the code and a one-tap button. Either one verifies the account. The button confirms the email
+on Supabase's server first and then opens the Site URL, so the account is verified even if that page can't load (for
+example `localhost` opened on a phone); the user can then log in normally.
 
 ```html
 <h2>Verify your FluxPay account</h2>
-<p>Your verification code is:</p>
+<p>Enter this code in the FluxPay app:</p>
 <h1 style="letter-spacing:6px">{{ .Token }}</h1>
-<p>It expires in 1 hour. If you didn't sign up, ignore this email.</p>
+<p>Or confirm with one tap, then log in:</p>
+<p><a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold">Confirm my email</a></p>
+<p>The code and button expire in 1 hour. If you didn't sign up, ignore this email.</p>
 ```
 
 Reset password:
@@ -51,6 +56,10 @@ Supabase's built-in mailer is for testing only: **it only delivers to your own p
 few emails per hour.** Anyone else signing up gets no email. Create a free account at
 [Resend](https://resend.com), [Brevo](https://brevo.com) or similar, verify a sending domain, and paste the SMTP
 host/port/user/password into Authentication → SMTP Settings.
+
+For Brevo: host `smtp-relay.brevo.com`, port `587`, **username = the full SMTP Login shown on Brevo → SMTP & API → SMTP
+(`…@smtp-brevo.com`, not your account email)**, password = an SMTP key (`xsmtpsib-…`, not an API key `xkeysib-…`). The
+sender email must be a verified sender in Brevo. A wrong username shows up only as "Error sending confirmation email".
 
 ### c) Get your keys
 

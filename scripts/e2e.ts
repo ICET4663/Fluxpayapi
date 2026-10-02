@@ -139,10 +139,22 @@ async function main() {
   check('refresh token yields a new session', refreshed.status === 200 && !!refreshed.body?.tokens?.accessToken, refreshed.body);
   if (refreshed.status === 200) {
     token = refreshed.body.tokens.accessToken;
-    const reuse = await call('POST', '/api/auth/refresh', { body: { refreshToken } });
-    check('rotated refresh token cannot be reused', reuse.status === 401, reuse.body);
     refreshToken = refreshed.body.tokens.refreshToken;
   }
+
+  // Replay protection, on a separate session so a detected replay can't disturb the main one. Supabase tolerates
+  // reuse of a rotated token (a) within the reuse interval (Auth > Sessions, default 10s) and (b) while its successor is
+  // still unused, by handing back that successor; that covers clients that lost a refresh response. A real replay is
+  // reusing a token after its successor has itself been rotated, past the interval: that must fail.
+  const replayLogin = await call('POST', '/api/auth/login', { body: { email, password: PASSWORD } });
+  const t0 = replayLogin.body?.tokens?.refreshToken as string;
+  const r1 = await call('POST', '/api/auth/refresh', { body: { refreshToken: t0 } });
+  const r2 = await call('POST', '/api/auth/refresh', { body: { refreshToken: r1.body?.tokens?.refreshToken } });
+  const reuseIntervalSec = Number(process.env.E2E_REFRESH_REUSE_INTERVAL ?? 10);
+  console.log(`  … waiting ${reuseIntervalSec + 1}s for the refresh-token reuse interval`);
+  await new Promise((r) => setTimeout(r, (reuseIntervalSec + 1) * 1000));
+  const tokenReplay = await call('POST', '/api/auth/refresh', { body: { refreshToken: t0 } });
+  check('replayed refresh token is rejected', r1.status === 200 && r2.status === 200 && tokenReplay.status === 401, { r1: r1.status, r2: r2.status, replay: tokenReplay.status });
 
   // -------------------------------------------------------------------------------------------------------------
   section('Password recovery');
