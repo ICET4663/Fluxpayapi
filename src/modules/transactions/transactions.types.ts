@@ -37,7 +37,7 @@ export interface TransactionRow {
   status: string;
   provider: string | null;
   provider_reference: string | null;
-  metadata: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,7 +58,7 @@ export function mapTransaction(row: TransactionRow): Transaction {
     status: row.status as TransactionStatus,
     provider: row.provider,
     providerReference: row.provider_reference,
-    metadata: row.metadata ? JSON.parse(row.metadata) : null,
+    metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -2,15 +2,24 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.ts';
 import { validateBody } from '../../middleware/validate.ts';
 import { initializeFundingSchema, mockCompleteSchema } from './wallet.schema.ts';
-import { getWallet, initializeFunding, mockCheckoutInfo, mockComplete, webhook } from './wallet.controller.ts';
+import {
+  getWallet,
+  initializeFunding,
+  mockCheckoutInfo,
+  mockComplete,
+  requireMockPayments,
+  webhook,
+} from './wallet.controller.ts';
 
 export const walletRouter = Router();
 
-// Public: real payment gateways call this without our JWT, authenticity comes from the signature instead.
+// Public: real payment gateways call this without a user session; authenticity comes from the HMAC signature.
 walletRouter.post('/fund/webhook', webhook);
-walletRouter.get('/fund/mock-checkout', mockCheckoutInfo);
-walletRouter.post('/fund/mock-complete', validateBody(mockCompleteSchema), mockComplete);
 
 walletRouter.use(requireAuth);
 walletRouter.get('/', getWallet);
 walletRouter.post('/fund/initialize', validateBody(initializeFundingSchema), initializeFunding);
+
+// Dev/test stand-ins for the hosted checkout page. Authenticated, owner-only, and disabled in production.
+walletRouter.get('/fund/mock-checkout', requireMockPayments, mockCheckoutInfo);
+walletRouter.post('/fund/mock-complete', requireMockPayments, validateBody(mockCompleteSchema), mockComplete);

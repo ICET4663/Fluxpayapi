@@ -1,19 +1,73 @@
-function required(name: string, fallback?: string): string {
-  const value = process.env[name] ?? fallback;
-  if (value === undefined) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
+import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
+
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const isProd = nodeEnv === 'production';
+
+// Supabase renamed its keys (anon -> publishable, service_role -> secret). Both spellings work.
+// A blank value in .env (KEY=) counts as unset, so optional keys fall back to their defaults.
+const present = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== ''));
+
+const raw = {
+  ...present,
+  SUPABASE_PUBLISHABLE_KEY: present.SUPABASE_PUBLISHABLE_KEY ?? present.SUPABASE_ANON_KEY,
+  SUPABASE_SECRET_KEY: present.SUPABASE_SECRET_KEY ?? present.SUPABASE_SERVICE_ROLE_KEY,
+};
+
+const bool = z
+  .enum(['true', 'false'])
+  .transform((v) => v === 'true');
+
+const schema = z.object({
+  PORT: z.coerce.number().int().positive().default(4000),
+  DATABASE_URL: z
+    .string({ required_error: 'DATABASE_URL is required (Supabase > Connect > Session pooler connection string)' })
+    .startsWith('postgres', 'DATABASE_URL must be a postgres:// connection string'),
+  SUPABASE_URL: z
+    .string({ required_error: 'SUPABASE_URL is required (Supabase > Project Settings > API)' })
+    .url(),
+  SUPABASE_PUBLISHABLE_KEY: z.string({ required_error: 'SUPABASE_PUBLISHABLE_KEY (or SUPABASE_ANON_KEY) is required' }).min(20),
+  SUPABASE_SECRET_KEY: z.string({ required_error: 'SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) is required' }).min(20),
+  APP_SECRET: isProd
+    ? z.string().min(32, 'APP_SECRET must be at least 32 characters in production')
+    : z.string().min(16).default(() => randomBytes(32).toString('hex')),
+  PAYMENT_WEBHOOK_SECRET: isProd
+    ? z.string().min(32, 'PAYMENT_WEBHOOK_SECRET must be at least 32 characters in production')
+    : z.string().min(16).default(() => randomBytes(32).toString('hex')),
+  CORS_ORIGINS: z.string().default('http://localhost:5173,http://localhost:5174,http://localhost:3000'),
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  ENABLE_MOCK_PAYMENTS: bool.default(isProd ? 'false' : 'true'),
+  DATABASE_SSL: bool.default('true'),
+  DISABLE_RATE_LIMITS: bool.default('false'),
+});
+
+const parsed = schema.safeParse(raw);
+if (!parsed.success) {
+  const lines = parsed.error.issues.map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`);
+  console.error(`\nInvalid environment configuration:\n${lines.join('\n')}\n\nSee .env.example for the full list.\n`);
+  process.exit(1);
+}
+
+const e = parsed.data;
+
+if (isProd && (e.ENABLE_MOCK_PAYMENTS || e.DISABLE_RATE_LIMITS)) {
+  console.error('ENABLE_MOCK_PAYMENTS and DISABLE_RATE_LIMITS must not be true in production.');
+  process.exit(1);
 }
 
 export const env = {
-  nodeEnv: process.env.NODE_ENV ?? 'development',
-  port: Number(process.env.PORT ?? 4000),
-  jwtAccessSecret: required('JWT_ACCESS_SECRET', 'dev-access-secret-change-me'),
-  jwtRefreshSecret: required('JWT_REFRESH_SECRET', 'dev-refresh-secret-change-me'),
-  webhookSecret: required('PAYMENT_WEBHOOK_SECRET', 'dev-webhook-secret-change-me'),
-  accessTokenTtl: '15m',
-  refreshTokenTtlDays: 30,
-  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
-  isProd: (process.env.NODE_ENV ?? 'development') === 'production',
+  nodeEnv,
+  isProd,
+  port: e.PORT,
+  databaseUrl: e.DATABASE_URL,
+  databaseSsl: e.DATABASE_SSL,
+  supabaseUrl: e.SUPABASE_URL,
+  supabasePublishableKey: e.SUPABASE_PUBLISHABLE_KEY,
+  supabaseSecretKey: e.SUPABASE_SECRET_KEY,
+  appSecret: e.APP_SECRET,
+  webhookSecret: e.PAYMENT_WEBHOOK_SECRET,
+  corsOrigins: e.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
+  trustProxy: e.TRUST_PROXY,
+  enableMockPayments: e.ENABLE_MOCK_PAYMENTS,
+  disableRateLimits: e.DISABLE_RATE_LIMITS,
 };

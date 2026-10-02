@@ -1,13 +1,11 @@
-import { db } from '../../db/client.ts';
+import { query, queryOne } from '../../db/pool.ts';
 
 export interface AdminUserRow {
   id: string;
   full_name: string;
   email: string;
-  phone: string;
+  phone: string | null;
   role: string;
-  email_verified_at: string | null;
-  phone_verified_at: string | null;
   created_at: string;
   balance_kobo: number;
 }
@@ -18,33 +16,30 @@ export interface ListUsersOptions {
   search?: string;
 }
 
-export function listUsersAdmin(options: ListUsersOptions): { items: AdminUserRow[]; total: number } {
-  const where: string[] = [];
-  const params: string[] = [];
+/** Escape LIKE wildcards so a search for "50%" matches literally. */
+function likeTerm(search: string) {
+  return `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
+export async function listUsersAdmin(options: ListUsersOptions): Promise<{ items: AdminUserRow[]; total: number }> {
+  const params: unknown[] = [];
+  let where = '';
   if (options.search) {
-    where.push('(u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)');
-    const term = `%${options.search}%`;
-    params.push(term, term, term);
+    params.push(likeTerm(options.search));
+    where = `where (p.full_name ilike $1 or p.email ilike $1 or p.phone ilike $1)`;
   }
-  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const totalRow = db.prepare(`SELECT COUNT(*) as count FROM users u ${whereClause}`).get(...params) as {
-    count: number;
-  };
-
-  const rows = db
-    .prepare(
-      `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.email_verified_at, u.phone_verified_at, u.created_at,
-              COALESCE(w.balance_kobo, 0) as balance_kobo
-       FROM users u
-       LEFT JOIN wallets w ON w.user_id = u.id
-       ${whereClause}
-       ORDER BY u.created_at DESC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(...params, options.limit, options.offset) as unknown as AdminUserRow[];
-
-  return { items: rows, total: totalRow.count };
+  const totalRow = await queryOne<{ count: number }>(`select count(*)::int as count from profiles p ${where}`, params);
+  const rows = await query<AdminUserRow>(
+    `select p.id, p.full_name, p.email, p.phone, p.role, p.created_at, coalesce(w.balance_kobo, 0) as balance_kobo
+       from profiles p
+       left join wallets w on w.user_id = p.id
+       ${where}
+      order by p.created_at desc
+      limit $${params.length + 1} offset $${params.length + 2}`,
+    [...params, options.limit, options.offset],
+  );
+  return { items: rows, total: totalRow?.count ?? 0 };
 }
 
 export interface AdminTransactionRow {
@@ -72,43 +67,40 @@ export interface ListTransactionsAdminOptions {
   search?: string;
 }
 
-export function listTransactionsAdmin(
+export async function listTransactionsAdmin(
   options: ListTransactionsAdminOptions,
-): { items: AdminTransactionRow[]; total: number } {
-  const where: string[] = [];
-  const params: string[] = [];
+): Promise<{ items: AdminTransactionRow[]; total: number }> {
+  const params: unknown[] = [];
+  const clauses: string[] = [];
   if (options.status) {
-    where.push('t.status = ?');
     params.push(options.status);
+    clauses.push(`t.status = $${params.length}`);
   }
   if (options.category) {
-    where.push('t.category = ?');
     params.push(options.category);
+    clauses.push(`t.category = $${params.length}`);
   }
   if (options.search) {
-    where.push('(t.reference LIKE ? OR u.full_name LIKE ? OR u.email LIKE ?)');
-    const term = `%${options.search}%`;
-    params.push(term, term, term);
+    params.push(likeTerm(options.search));
+    clauses.push(`(t.reference ilike $${params.length} or u.full_name ilike $${params.length} or u.email ilike $${params.length})`);
   }
-  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const where = clauses.length ? `where ${clauses.join(' and ')}` : '';
 
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) as count FROM transactions t JOIN users u ON u.id = t.user_id ${whereClause}`)
-    .get(...params) as { count: number };
-
-  const rows = db
-    .prepare(
-      `SELECT t.id, t.reference, t.title, t.subtitle, t.amount_kobo, t.fee_kobo, t.type, t.category, t.status,
-              t.provider, t.created_at, u.id as user_id, u.full_name as user_full_name, u.email as user_email
-       FROM transactions t
-       JOIN users u ON u.id = t.user_id
-       ${whereClause}
-       ORDER BY t.created_at DESC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(...params, options.limit, options.offset) as unknown as AdminTransactionRow[];
-
-  return { items: rows, total: totalRow.count };
+  const totalRow = await queryOne<{ count: number }>(
+    `select count(*)::int as count from transactions t join profiles u on u.id = t.user_id ${where}`,
+    params,
+  );
+  const rows = await query<AdminTransactionRow>(
+    `select t.id, t.reference, t.title, t.subtitle, t.amount_kobo, t.fee_kobo, t.type, t.category, t.status,
+            t.provider, t.created_at, u.id as user_id, u.full_name as user_full_name, u.email as user_email
+       from transactions t
+       join profiles u on u.id = t.user_id
+       ${where}
+      order by t.created_at desc
+      limit $${params.length + 1} offset $${params.length + 2}`,
+    [...params, options.limit, options.offset],
+  );
+  return { items: rows, total: totalRow?.count ?? 0 };
 }
 
 export interface DashboardStats {
@@ -123,50 +115,41 @@ export interface DashboardStats {
   todayRevenueKobo: number;
 }
 
-export function getDashboardStats(): DashboardStats {
-  const totalUsers = (db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number }).count;
-
-  const totalWalletBalanceKobo = (
-    db.prepare(`SELECT COALESCE(SUM(balance_kobo), 0) as total FROM wallets`).get() as { total: number }
-  ).total;
-
-  const today = db
-    .prepare(
-      `SELECT
-         COUNT(*) as count,
-         COALESCE(SUM(amount_kobo), 0) as value,
-         SUM(CASE WHEN status = 'successful' THEN 1 ELSE 0 END) as successful,
-         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-         SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) as pending
-       FROM transactions
-       WHERE date(created_at) = date('now')`,
-    )
-    .get() as { count: number; value: number; successful: number; failed: number; pending: number };
-
-  const allTimeRevenueKobo = (
-    db.prepare(`SELECT COALESCE(SUM(fee_kobo), 0) as total FROM transactions WHERE status = 'successful'`).get() as {
-      total: number;
-    }
-  ).total;
-
-  const todayRevenueKobo = (
-    db
-      .prepare(
-        `SELECT COALESCE(SUM(fee_kobo), 0) as total FROM transactions WHERE status = 'successful' AND date(created_at) = date('now')`,
-      )
-      .get() as { total: number }
-  ).total;
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const row = await queryOne<{
+    total_users: number;
+    total_wallet_balance_kobo: number;
+    today_count: number;
+    today_value_kobo: number;
+    today_successful: number;
+    today_failed: number;
+    today_pending: number;
+    all_time_revenue_kobo: number;
+    today_revenue_kobo: number;
+  }>(
+    `select
+       (select count(*)::int from profiles)                                         as total_users,
+       (select coalesce(sum(balance_kobo), 0)::bigint from wallets)                     as total_wallet_balance_kobo,
+       count(*) filter (where created_at >= date_trunc('day', now()))::int          as today_count,
+       coalesce(sum(amount_kobo) filter (where created_at >= date_trunc('day', now())), 0)::bigint                         as today_value_kobo,
+       count(*) filter (where created_at >= date_trunc('day', now()) and status = 'successful')::int                as today_successful,
+       count(*) filter (where created_at >= date_trunc('day', now()) and status = 'failed')::int                    as today_failed,
+       count(*) filter (where created_at >= date_trunc('day', now()) and status in ('pending', 'processing'))::int  as today_pending,
+       coalesce(sum(fee_kobo) filter (where status = 'successful'), 0)::bigint                                              as all_time_revenue_kobo,
+       coalesce(sum(fee_kobo) filter (where status = 'successful' and created_at >= date_trunc('day', now())), 0)::bigint   as today_revenue_kobo
+     from transactions`,
+  );
 
   return {
-    totalUsers,
-    totalWalletBalanceKobo,
-    todayCount: today.count,
-    todayValueKobo: today.value,
-    todaySuccessful: today.successful ?? 0,
-    todayFailed: today.failed ?? 0,
-    todayPending: today.pending ?? 0,
-    allTimeRevenueKobo,
-    todayRevenueKobo,
+    totalUsers: row?.total_users ?? 0,
+    totalWalletBalanceKobo: row?.total_wallet_balance_kobo ?? 0,
+    todayCount: row?.today_count ?? 0,
+    todayValueKobo: row?.today_value_kobo ?? 0,
+    todaySuccessful: row?.today_successful ?? 0,
+    todayFailed: row?.today_failed ?? 0,
+    todayPending: row?.today_pending ?? 0,
+    allTimeRevenueKobo: row?.all_time_revenue_kobo ?? 0,
+    todayRevenueKobo: row?.today_revenue_kobo ?? 0,
   };
 }
 
@@ -175,26 +158,25 @@ export interface AdminAuditLogRow {
   user_id: string | null;
   action: string;
   ip: string | null;
-  metadata: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
   user_full_name: string | null;
   user_email: string | null;
 }
 
-export function listAuditLogsAdmin(options: { limit: number; offset: number }): {
+export async function listAuditLogsAdmin(options: { limit: number; offset: number }): Promise<{
   items: AdminAuditLogRow[];
   total: number;
-} {
-  const totalRow = db.prepare(`SELECT COUNT(*) as count FROM audit_logs`).get() as { count: number };
-  const rows = db
-    .prepare(
-      `SELECT a.id, a.user_id, a.action, a.ip, a.metadata, a.created_at,
-              u.full_name as user_full_name, u.email as user_email
-       FROM audit_logs a
-       LEFT JOIN users u ON u.id = a.user_id
-       ORDER BY a.created_at DESC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(options.limit, options.offset) as unknown as AdminAuditLogRow[];
-  return { items: rows, total: totalRow.count };
+}> {
+  const totalRow = await queryOne<{ count: number }>(`select count(*)::int as count from audit_logs`);
+  const rows = await query<AdminAuditLogRow>(
+    `select a.id, a.user_id, a.action, a.ip, a.metadata, a.created_at,
+            u.full_name as user_full_name, u.email as user_email
+       from audit_logs a
+       left join profiles u on u.id = a.user_id
+      order by a.created_at desc
+      limit $1 offset $2`,
+    [options.limit, options.offset],
+  );
+  return { items: rows, total: totalRow?.count ?? 0 };
 }

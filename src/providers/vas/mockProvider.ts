@@ -14,6 +14,18 @@ function shouldSimulateFailure(identifier: string): boolean {
 export const mockVasProvider: VasProvider = {
   name: 'mock-vas',
 
+  async validateMeter(input) {
+    await delay(200);
+    if (shouldSimulateFailure(input.meterNumber)) return { valid: false, message: 'Meter number not found' };
+    return { valid: true, customerName: 'JOHN ADEBAYO' };
+  },
+
+  async validateSmartCard(input) {
+    await delay(200);
+    if (shouldSimulateFailure(input.smartCardNumber)) return { valid: false, message: 'Smart card number not found' };
+    return { valid: true, customerName: 'JOHN ADEBAYO' };
+  },
+
   async buyAirtime(input: BuyAirtimeInput): Promise<ProviderResult> {
     await delay(400 + Math.random() * 400);
     if (shouldSimulateFailure(input.phone)) {

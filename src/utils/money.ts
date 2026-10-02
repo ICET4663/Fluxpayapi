@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 export function nairaToKobo(naira: number): number {
   return Math.round(naira * 100);
 }
@@ -8,10 +10,6 @@ export function koboToNaira(kobo: number): number {
 
 export function generateReference(prefix = 'FLX'): string {
   const stamp = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const rand = randomBytes(5).toString('hex').toUpperCase();
   return `${prefix}-${stamp}${rand}`;
-}
-
-export function generateOtpCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
 }

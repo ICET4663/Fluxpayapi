@@ -1,10 +1,12 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler.ts';
 import { AppError } from '../../utils/AppError.ts';
-import { hashSecret, verifySecret } from '../../lib/password.ts';
 import { recordAudit } from '../../lib/audit.ts';
-import { revokeAllRefreshTokensForUser } from '../auth/refreshToken.repository.ts';
-import { setBiometricEnabled, setPasswordHash, setPinHash, updateProfile } from './users.repository.ts';
+import { adminClient } from '../../lib/supabase.ts';
+import { assertPasswordCorrect } from '../auth/auth.service.ts';
+import { createNotification } from '../notifications/notifications.repository.ts';
+import { assertPinCorrect, hashPin } from './pin.service.ts';
+import { setBiometricEnabled, setPinHash, updateProfile } from './users.repository.ts';
 import { publicUser } from './users.types.ts';
 
 export const getMe = asyncHandler(async (req: Request, res: Response) => {
@@ -12,30 +14,58 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const patchMe = asyncHandler(async (req: Request, res: Response) => {
-  const updated = updateProfile(req.user!.id, req.body);
+  const updated = await updateProfile(req.user!.id, req.body);
   res.json({ user: publicUser(updated) });
 });
 
 export const setPin = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user!.phoneVerifiedAt) throw AppError.forbidden('Verify your phone number before setting a transaction PIN');
-  const pinHash = await hashSecret(req.body.pin);
-  setPinHash(req.user!.id, pinHash);
-  recordAudit('pin_set', req.user!.id, undefined);
-  res.json({ message: 'Transaction PIN set' });
+  const user = req.user!;
+  if (user.pinHash) {
+    // Changing an existing PIN requires knowing the current one (with the same lockout as payments).
+    if (!req.body.currentPin) throw AppError.badRequest('Enter your current PIN to change it');
+    await assertPinCorrect(user, req.body.currentPin, req.ip);
+  }
+  await setPinHash(user.id, await hashPin(req.body.pin));
+  recordAudit(user.pinHash ? 'pin_changed' : 'pin_set', user.id, req.ip);
+  if (user.pinHash) await createNotification(user.id, 'security', 'Transaction PIN changed', 'Your transaction PIN was changed.');
+  res.json({ message: user.pinHash ? 'Transaction PIN changed' : 'Transaction PIN set' });
+});
+
+export const verifyPin = asyncHandler(async (req: Request, res: Response) => {
+  await assertPinCorrect(req.user!, req.body.pin, req.ip);
+  res.json({ valid: true });
+});
+
+/** Forgot-PIN: the account password (not just a bearer token) is required, so a stolen session cannot reset it. */
+export const resetPin = asyncHandler(async (req: Request, res: Response) => {
+  const user = req.user!;
+  await assertPasswordCorrect(user.email, req.body.password);
+  await setPinHash(user.id, await hashPin(req.body.pin));
+  recordAudit('pin_reset', user.id, req.ip);
+  await createNotification(user.id, 'security', 'Transaction PIN reset', 'Your transaction PIN was reset using your account password.');
+  res.json({ message: 'Transaction PIN reset' });
 });
 
 export const setBiometric = asyncHandler(async (req: Request, res: Response) => {
-  setBiometricEnabled(req.user!.id, req.body.enabled);
+  await setBiometricEnabled(req.user!.id, req.body.enabled);
   res.json({ message: 'Preference updated' });
 });
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
-  const ok = await verifySecret(req.body.currentPassword, req.user!.passwordHash);
-  if (!ok) throw AppError.unauthorized('Current password is incorrect');
+  const user = req.user!;
+  await assertPasswordCorrect(user.email, req.body.currentPassword);
 
-  setPasswordHash(req.user!.id, await hashSecret(req.body.newPassword));
-  // Force re-authentication everywhere else — a leaked session shouldn't survive a password change.
-  revokeAllRefreshTokensForUser(req.user!.id);
-  recordAudit('password_changed', req.user!.id, undefined);
+  const { error } = await adminClient.auth.admin.updateUserById(user.id, { password: req.body.newPassword });
+  if (error) {
+    if (error.code === 'same_password') throw AppError.badRequest('New password must be different from your current password');
+    if (error.code === 'weak_password') throw AppError.badRequest('Password is too weak. Use at least 8 characters with letters and numbers.');
+    console.error('Password change failed:', error.message);
+    throw new AppError(502, 'auth_provider_error', 'We could not change your password right now.');
+  }
+
+  // Keep this device signed in, end every other one — a leaked session should not survive a password change.
+  await adminClient.auth.admin.signOut(req.accessToken!, 'others').catch(() => {});
+  recordAudit('password_changed', user.id, req.ip);
+  await createNotification(user.id, 'security', 'Password changed', 'Your password was changed. If this was not you, contact support immediately.');
   res.json({ message: 'Password updated' });
 });

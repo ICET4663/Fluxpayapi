@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import { validateBody } from '../../middleware/validate.ts';
-import { authRateLimiter } from '../../middleware/rateLimit.ts';
+import { requireAuth } from '../../middleware/auth.ts';
+import { authRateLimiter, loginRateLimiter, otpRateLimiter } from '../../middleware/rateLimit.ts';
 import {
-  forgotPasswordSchema,
+  emailOnlySchema,
   loginSchema,
   refreshSchema,
   registerSchema,
-  resendOtpSchema,
   resetPasswordSchema,
-  verifyOtpSchema,
+  verifyEmailSchema,
+  verifyResetCodeSchema,
 } from './auth.schema.ts';
 import {
   doResetPassword,
@@ -17,19 +18,26 @@ import {
   logout,
   refresh,
   register,
-  resendOtp,
-  verifyOtp,
+  resendVerification,
+  verifyEmail,
+  verifyResetCodeHandler,
 } from './auth.controller.ts';
 
 export const authRouter = Router();
 
 authRouter.use(authRateLimiter);
 
-authRouter.post('/register', validateBody(registerSchema), register);
-authRouter.post('/verify-otp', validateBody(verifyOtpSchema), verifyOtp);
-authRouter.post('/resend-otp', validateBody(resendOtpSchema), resendOtp);
-authRouter.post('/login', validateBody(loginSchema), login);
+// Signup + email verification
+authRouter.post('/register', otpRateLimiter(5), validateBody(registerSchema), register);
+authRouter.post('/verify-email', otpRateLimiter(10), validateBody(verifyEmailSchema), verifyEmail);
+authRouter.post('/resend-verification', otpRateLimiter(5), validateBody(emailOnlySchema), resendVerification);
+
+// Sessions
+authRouter.post('/login', loginRateLimiter, validateBody(loginSchema), login);
 authRouter.post('/refresh', validateBody(refreshSchema), refresh);
-authRouter.post('/logout', validateBody(refreshSchema), logout);
-authRouter.post('/forgot-password', validateBody(forgotPasswordSchema), forgotPassword);
+authRouter.post('/logout', requireAuth, logout);
+
+// Password recovery
+authRouter.post('/forgot-password', otpRateLimiter(5), validateBody(emailOnlySchema), forgotPassword);
+authRouter.post('/verify-reset-code', otpRateLimiter(10), validateBody(verifyResetCodeSchema), verifyResetCodeHandler);
 authRouter.post('/reset-password', validateBody(resetPasswordSchema), doResetPassword);

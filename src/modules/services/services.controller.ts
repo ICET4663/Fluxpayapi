@@ -34,6 +34,7 @@ export const buyAirtime = asyncHandler(async (req: Request, res: Response) => {
   const { network, phone, amount, pin, idempotencyKey } = req.body;
   const tx = await purchaseService({
     user: req.user!,
+    ip: req.ip,
     pin,
     idempotencyKey,
     category: 'airtime',
@@ -53,6 +54,7 @@ export const buyData = asyncHandler(async (req: Request, res: Response) => {
 
   const tx = await purchaseService({
     user: req.user!,
+    ip: req.ip,
     pin,
     idempotencyKey,
     category: 'data',
@@ -75,6 +77,7 @@ export const payElectricity = asyncHandler(async (req: Request, res: Response) =
 
   const tx = await purchaseService({
     user: req.user!,
+    ip: req.ip,
     pin,
     idempotencyKey,
     category: 'electricity',
@@ -95,6 +98,7 @@ export const payTv = asyncHandler(async (req: Request, res: Response) => {
 
   const tx = await purchaseService({
     user: req.user!,
+    ip: req.ip,
     pin,
     idempotencyKey,
     category: 'tv',
@@ -106,4 +110,17 @@ export const payTv = asyncHandler(async (req: Request, res: Response) => {
       mockVasProvider.payTv({ provider, smartCardNumber, packageId, amountKobo: Math.round(pkg.priceNaira * 100), reference }),
   });
   res.status(201).json({ transaction: serializeTransaction(tx) });
+});
+
+export const validateMeter = asyncHandler(async (req: Request, res: Response) => {
+  const { discoId, meterNumber, meterType } = req.body;
+  if (!findDisco(discoId)) throw AppError.badRequest('Unknown distribution company');
+  const lookup = await mockVasProvider.validateMeter({ discoId, meterNumber, meterType });
+  res.json({ lookup });
+});
+
+export const validateSmartCard = asyncHandler(async (req: Request, res: Response) => {
+  const { provider, smartCardNumber } = req.body;
+  const lookup = await mockVasProvider.validateSmartCard({ provider, smartCardNumber });
+  res.json({ lookup });
 });

@@ -36,3 +36,14 @@ export const payTvSchema = z.object({
   pin: pinSchema,
   idempotencyKey: z.string().min(6).optional(),
 });
+
+export const validateMeterSchema = z.object({
+  discoId: z.string().min(1),
+  meterNumber: z.string().trim().min(6, 'Enter a valid meter number'),
+  meterType: z.enum(['prepaid', 'postpaid']),
+});
+
+export const validateSmartCardSchema = z.object({
+  provider: z.enum(TV_PROVIDERS),
+  smartCardNumber: z.string().trim().min(6, 'Enter a valid smart card / IUC number'),
+});
