@@ -1,0 +1,34 @@
+# Render Blueprint: Dashboard > New > Blueprint > pick this repo.
+# Values marked `sync: false` are secrets: Render asks for them when the Blueprint is created and never reads them from git.
+services:
+  - type: web
+    name: fluxpay-api
+    runtime: node
+    plan: free
+    region: frankfurt # closest Render region to the Supabase project (eu-west-1) and to Nigeria
+    branch: main
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # "staging" keeps the mock checkout available until a real payment gateway is wired in.
+      # Switch to "production" only once real payments are live (the server then refuses mock payments).
+      - key: NODE_ENV
+        value: staging
+      - key: TRUST_PROXY
+        value: "1"
+      - key: CORS_ORIGINS
+        value: http://localhost:5173,http://localhost:5174,http://localhost:5175
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_SECRET
+        generateValue: true
+      - key: PAYMENT_WEBHOOK_SECRET
+        generateValue: true
