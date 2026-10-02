@@ -20,7 +20,8 @@ the database stores kobo internally.
 | 400 | `bad_request` | Validation failed / bad input |
 | 400 | `invalid_code` | OTP wrong or expired |
 | 400 | `insufficient_funds` | Wallet balance too low |
-| 401 | `unauthorized` | Missing/expired token, wrong password |
+| 401 | `invalid_token` | Missing/expired/revoked access token → refresh once, then send to login |
+| 401 | `unauthorized` | Wrong email/password or wrong current password |
 | 401 | `incorrect_pin` | Wrong transaction PIN (message says attempts left) |
 | 403 | `email_not_verified` | Login attempted before the email code was entered → send user to the verify screen |
 | 403 | `forbidden` | Not allowed (e.g. no PIN set yet, not an admin) |

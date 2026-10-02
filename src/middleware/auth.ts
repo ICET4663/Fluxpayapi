@@ -46,14 +46,14 @@ async function resolveUserId(token: string): Promise<string | null> {
 
 export const requireAuth = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) throw AppError.unauthorized('Missing bearer token');
+  if (!header?.startsWith('Bearer ')) throw new AppError(401, 'invalid_token', 'Missing bearer token');
   const token = header.slice('Bearer '.length).trim();
 
   const userId = await resolveUserId(token);
-  if (!userId) throw AppError.unauthorized('Invalid or expired access token');
+  if (!userId) throw new AppError(401, 'invalid_token', 'Invalid or expired access token');
 
   const user = await findUserById(userId);
-  if (!user) throw AppError.unauthorized('Account profile not found');
+  if (!user) throw new AppError(401, 'invalid_token', 'Account profile not found');
 
   req.user = user;
   req.accessToken = token;
