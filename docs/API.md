@@ -116,6 +116,12 @@ With `PAYMENT_PROVIDER=paystack`, `authorizationUrl` is Paystack's hosted checko
 
 `transaction` = `{ id, reference, title, subtitle, amount, fee, type, category, status, createdAt }`
 
+## Banking / withdrawals 🔒
+
+- `GET /api/banking/banks` → `{ banks: [{ code, name }], fee, min, max }` (fee ₦50 per withdrawal; ₦100–500,000)
+- `POST /api/banking/resolve` `{ bankCode, accountNumber }` → `{ accountName }`. Show the name so the user confirms it before sending. `400` if the account does not exist.
+- `POST /api/banking/withdraw` `{ bankCode, accountNumber (10 digits), amount, pin, idempotencyKey? }` → `201 { transaction }`. The wallet is debited `amount + fee` up front. `status`: `successful`, `failed` (refunded), or `processing` (the bank transfer is still settling; poll `GET /api/transactions/:reference`, it can take a few minutes).
+
 ## Notifications 🔒
 
 - `GET /api/notifications?limit=30&offset=0` → `{ notifications: [{ id, type, title, body, metadata, read, createdAt }], total, unread }`

@@ -300,6 +300,37 @@ async function main() {
   check('unread count is zero afterwards', (await call('GET', '/api/notifications', { token })).body.unread === 0);
 
   // -------------------------------------------------------------------------------------------------------------
+  section('Bank withdrawals (mock gateway)');
+  const topUp = await call('POST', '/api/wallet/fund/initialize', { token, body: { amount: 20_000 } });
+  await call('POST', '/api/wallet/fund/mock-complete', { token, body: { reference: topUp.body.funding.reference, outcome: 'success' } });
+  const balBefore = (await call('GET', '/api/wallet', { token })).body.wallet.balance as number;
+
+  const banks = await call('GET', '/api/banking/banks', { token });
+  check('bank list with fee and limits', banks.status === 200 && banks.body.banks.length > 0 && banks.body.fee === 50, banks.body);
+  check('bank list needs auth', (await call('GET', '/api/banking/banks')).status === 401);
+  const bankCode: string = banks.body.banks[0].code;
+
+  const lookup = await call('POST', '/api/banking/resolve', { token, body: { bankCode, accountNumber: '0123456789' } });
+  check('account lookup returns the holder name', lookup.status === 200 && typeof lookup.body.accountName === 'string', lookup.body);
+  check('unknown account is rejected', (await call('POST', '/api/banking/resolve', { token, body: { bankCode, accountNumber: '0123450000' } })).status === 400);
+  check('account number must be 10 digits', (await call('POST', '/api/banking/resolve', { token, body: { bankCode, accountNumber: '123' } })).status === 400);
+
+  const wd = await call('POST', '/api/banking/withdraw', { token, body: { bankCode, accountNumber: '0123456789', amount: 5000, pin: PIN, idempotencyKey: 'idem-withdraw-1' } });
+  check('withdrawal succeeds and is recorded as a withdrawal', wd.status === 201 && wd.body.transaction.status === 'successful' && wd.body.transaction.category === 'withdrawal', wd.body);
+  check('withdrawal total includes the 50 fee', wd.body?.transaction?.amount === 5050 && wd.body?.transaction?.fee === 50, wd.body);
+  const wdAgain = await call('POST', '/api/banking/withdraw', { token, body: { bankCode, accountNumber: '0123456789', amount: 5000, pin: PIN, idempotencyKey: 'idem-withdraw-1' } });
+  check('retrying with the same idempotency key does not pay twice', wdAgain.body?.transaction?.reference === wd.body?.transaction?.reference);
+  const balAfter = (await call('GET', '/api/wallet', { token })).body.wallet.balance as number;
+  check('wallet was debited exactly once (5,050)', Math.round((balBefore - balAfter) * 100) === 505_000, { balBefore, balAfter });
+
+  const wdFail = await call('POST', '/api/banking/withdraw', { token, body: { bankCode, accountNumber: '0123450000', amount: 1000, pin: PIN } });
+  check('withdrawal to an unresolvable account is refused before any debit', wdFail.status === 400, wdFail.body);
+  check('wrong PIN is refused', (await call('POST', '/api/banking/withdraw', { token, body: { bankCode, accountNumber: '0123456789', amount: 1000, pin: '9999' } })).status === 401);
+  check('below the minimum is refused', (await call('POST', '/api/banking/withdraw', { token, body: { bankCode, accountNumber: '0123456789', amount: 10, pin: PIN } })).status === 400);
+  const balFinal = (await call('GET', '/api/wallet', { token })).body.wallet.balance as number;
+  check('refused withdrawals changed nothing', balFinal === balAfter, { balAfter, balFinal });
+
+  // -------------------------------------------------------------------------------------------------------------
   section('PIN brute-force lockout');
   const victim = stranger;
   await call('POST', '/api/users/me/pin', { token: victim.token, body: { pin: '5555' } });

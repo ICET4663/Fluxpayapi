@@ -6,6 +6,7 @@ import { koboToNaira } from '../../utils/money.ts';
 import { mockPaymentGateway } from '../../providers/payment/mockGateway.ts';
 import { paymentGateway } from '../../providers/payment/index.ts';
 import { recordAudit } from '../../lib/audit.ts';
+import { settleWithdrawal } from '../banking/banking.service.ts';
 import { getWalletByUserIdOrThrow } from './wallet.repository.ts';
 import { buildMockWebhookCall, initializeWalletFunding, settleWalletFunding, verifyWalletFunding } from './wallet.service.ts';
 import { getUserTransactionByReference } from '../transactions/transactions.repository.ts';
@@ -76,7 +77,8 @@ export const webhook = asyncHandler(async (req: Request, res: Response) => {
   const event = paymentGateway.parseWebhookEvent(rawBody);
   if (event) {
     try {
-      await settleWalletFunding(event);
+      if (event.kind === 'transfer') await settleWithdrawal(event);
+      else await settleWalletFunding(event);
     } catch (err) {
       // An unknown reference (e.g. a charge from another product on the same Paystack account) is not ours to settle.
       // Answer 200 anyway so the gateway does not retry it forever; real failures still surface as errors.

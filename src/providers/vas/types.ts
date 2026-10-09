@@ -1,5 +1,7 @@
 export interface ProviderResult {
   success: boolean;
+  /** Accepted but not final (e.g. a bank transfer awaiting its webhook): keep the transaction `processing`, do not refund. */
+  pending?: boolean;
   providerReference: string;
   message: string;
 }

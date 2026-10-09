@@ -9,6 +9,7 @@ import { usersRouter } from './modules/users/users.routes.ts';
 import { walletRouter } from './modules/wallet/wallet.routes.ts';
 import { transactionsRouter } from './modules/transactions/transactions.routes.ts';
 import { servicesRouter } from './modules/services/services.routes.ts';
+import { bankingRouter } from './modules/banking/banking.routes.ts';
 import { notificationsRouter } from './modules/notifications/notifications.routes.ts';
 import { adminRouter } from './modules/admin/admin.routes.ts';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.ts';
@@ -53,6 +54,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/wallet', walletRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/services', servicesRouter);
+app.use('/api/banking', bankingRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/admin', adminRouter);
 

@@ -125,6 +125,12 @@ export async function purchaseService(input: PurchaseInput): Promise<Transaction
     result = { success: false, providerReference: reference, message: err instanceof Error ? err.message : 'Provider error' };
   }
 
+  if (result.pending) {
+    // Accepted but not final (bank transfer): keep it `processing`; the gateway's webhook (or the reconciler) settles it.
+    const accepted = await transitionTransaction(pending.id, ['processing'], 'processing', { providerReference: result.providerReference });
+    return accepted ?? pending;
+  }
+
   if (result.success) {
     const settled = await transitionTransaction(pending.id, ['processing'], 'successful', {
       providerReference: result.providerReference,

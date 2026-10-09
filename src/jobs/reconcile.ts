@@ -1,6 +1,8 @@
 import { query } from '../db/pool.ts';
 import { recordAudit } from '../lib/audit.ts';
 import { purgeExpiredResetTokens } from '../lib/resetToken.ts';
+import { paymentGateway } from '../providers/payment/index.ts';
+import { settleWithdrawal } from '../modules/banking/banking.service.ts';
 import { mockVasProvider } from '../providers/vas/mockProvider.ts';
 import { createNotification } from '../modules/notifications/notifications.repository.ts';
 import { refundFailedTransaction } from '../modules/services/services.service.ts';
@@ -19,7 +21,7 @@ export async function reconcile() {
   // 1. Debits stuck in `processing`: the server died, or the provider never answered, between debit and settle.
   const stuck = await query<TransactionRow>(
     `select * from transactions
-      where status = 'processing' and type = 'debit' and updated_at < now() - make_interval(mins => $1)
+      where status = 'processing' and type = 'debit' and category <> 'withdrawal' and updated_at < now() - make_interval(mins => $1)
       order by updated_at limit 50`,
     [STALE_PROCESSING_MINUTES],
   );
@@ -48,6 +50,26 @@ export async function reconcile() {
       }
     } catch (err) {
       console.error(`reconcile: ${tx.reference} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  // 1b. Withdrawals stuck in `processing`. Unlike a bill payment these are NEVER refunded on a guess: the bank
+  //     transfer may already have left. Ask the gateway; if it cannot give a final answer, leave it alone.
+  const stuckWithdrawals = await query<TransactionRow>(
+    `select * from transactions
+      where status = 'processing' and category = 'withdrawal' and updated_at < now() - make_interval(mins => $1)
+      order by updated_at limit 50`,
+    [STALE_PROCESSING_MINUTES],
+  );
+  for (const row of stuckWithdrawals) {
+    const tx = mapTransaction(row);
+    try {
+      if (!paymentGateway.verifyTransfer) continue;
+      const state = await paymentGateway.verifyTransfer(tx.reference);
+      if (state === 'pending') continue;
+      await settleWithdrawal({ kind: 'transfer', reference: tx.reference, status: state, amountKobo: tx.amountKobo - tx.feeKobo });
+    } catch (err) {
+      console.error(`reconcile: withdrawal ${tx.reference} failed:`, err instanceof Error ? err.message : err);
     }
   }
 
