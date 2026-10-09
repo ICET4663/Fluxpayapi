@@ -2,10 +2,16 @@ import { withTransaction } from '../../db/pool.ts';
 import { AppError } from '../../utils/AppError.ts';
 import { generateReference, koboToNaira, nairaToKobo } from '../../utils/money.ts';
 import { recordAudit } from '../../lib/audit.ts';
-import { mockPaymentGateway, signWebhookPayload } from '../../providers/payment/mockGateway.ts';
+import { signWebhookPayload } from '../../providers/payment/mockGateway.ts';
+import { paymentGateway } from '../../providers/payment/index.ts';
 import type { WebhookEvent } from '../../providers/payment/types.ts';
 import { creditWallet, getWalletByUserIdOrThrow } from './wallet.repository.ts';
-import { createTransaction, getTransactionByReference, transitionTransaction } from '../transactions/transactions.repository.ts';
+import {
+  createTransaction,
+  getTransactionByReference,
+  getUserTransactionByReference,
+  transitionTransaction,
+} from '../transactions/transactions.repository.ts';
 import { createNotification } from '../notifications/notifications.repository.ts';
 import { findUserById } from '../users/users.repository.ts';
 
@@ -17,7 +23,7 @@ export async function initializeWalletFunding(userId: string, amountNaira: numbe
   const reference = generateReference('FUND');
   const amountKobo = nairaToKobo(amountNaira);
 
-  await createTransaction({
+  const pending = await createTransaction({
     userId,
     walletId: wallet.id,
     reference,
@@ -27,10 +33,17 @@ export async function initializeWalletFunding(userId: string, amountNaira: numbe
     subtitle: 'Awaiting payment confirmation',
     amountKobo,
     status: 'pending',
-    provider: mockPaymentGateway.name,
+    provider: paymentGateway.name,
   });
 
-  return mockPaymentGateway.initialize({ amountKobo, email: user.email, reference });
+  try {
+    return await paymentGateway.initialize({ amountKobo, email: user.email, reference });
+  } catch (err) {
+    // Do not leave a pending ledger row behind for a checkout that never opened.
+    await transitionTransaction(pending.id, ['pending'], 'failed', { metadata: { reason: 'gateway_unavailable' } });
+    console.error('payment gateway initialize failed:', err instanceof Error ? err.message : err);
+    throw new AppError(502, 'payment_gateway_error', 'We could not start the payment. Please try again.');
+  }
 }
 
 /**
@@ -79,6 +92,19 @@ export async function settleWalletFunding(event: WebhookEvent) {
     if (failed) recordAudit('wallet_funding_failed', tx.userId, undefined, { reference: tx.reference });
     return failed ?? (await getTransactionByReference(tx.reference, client))!;
   });
+}
+
+/**
+ * Asks the gateway for the payment's final state and settles it. Covers a webhook that is late or never arrives
+ * (the user returns from checkout before Paystack calls us). Safe to call repeatedly.
+ */
+export async function verifyWalletFunding(userId: string, reference: string) {
+  const tx = await getUserTransactionByReference(userId, reference);
+  if (!tx || tx.category !== 'wallet_funding') throw AppError.notFound('Unknown transaction reference');
+  if (tx.status !== 'pending' || !paymentGateway.verifyTransaction) return tx;
+
+  const event = await paymentGateway.verifyTransaction(reference);
+  return event ? settleWalletFunding(event) : tx;
 }
 
 export function buildMockWebhookCall(reference: string, outcome: 'success' | 'failed', amountKobo: number) {

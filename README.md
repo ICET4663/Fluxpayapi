@@ -142,9 +142,8 @@ src/jobs/reconcile.ts refunds stuck payments, expires abandoned funding, deletes
 
 - **Real VAS provider** (VTpass, Flutterwave Bills, …): implement the `VasProvider` interface in `src/providers/vas`.
   Failure simulation in the mock: any phone/meter/smartcard number ending in `0000`.
-- **Real payment gateway** (Paystack, Flutterwave, …): implement `PaymentGateway` in `src/providers/payment`; the
-  signed-webhook endpoint and settlement logic already exist. The `mock-*` checkout routes are dev-only (the server
-  refuses to boot with them enabled in production).
+- **Payments:** Paystack is implemented (`src/providers/payment/paystackGateway.ts`) but untested against Paystack itself until
+  you add test keys; see "Paystack" below. The `mock-*` checkout routes are dev/staging only.
 - **Phone number verification** (SMS OTP): phone is collected and stored but not verified. Needs an SMS provider.
 - **Bank withdrawals** (`withdrawal` category exists in the schema; no endpoint yet).
 
@@ -175,3 +174,16 @@ The free plan sleeps after ~15 minutes without traffic; the first request afterw
 Set `NODE_ENV=production`, a 32+ character `APP_SECRET` and `PAYMENT_WEBHOOK_SECRET`, `CORS_ORIGINS` to your real
 frontend origin(s), `TRUST_PROXY=1` behind one proxy/load balancer, and run `npm start`. Production refuses to start
 with the mock checkout enabled, so a real payment gateway must be in place first.
+
+## Paystack (wallet top-ups)
+
+All users pay into ONE Paystack merchant account; each user's balance is their own `wallets` row, credited only when a
+payment carrying *their* unique reference is confirmed.
+
+1. Paystack dashboard → Settings → API Keys: copy the **test** secret key (`sk_test_...`).
+2. In `.env` (and Render): `PAYMENT_PROVIDER=paystack` and `PAYSTACK_SECRET_KEY=sk_test_...`.
+3. Paystack dashboard → Settings → API Keys & Webhooks → **Webhook URL**: `https://<your-api-host>/api/wallet/fund/webhook`
+   (locally, tunnel with e.g. ngrok; the verify endpoint below also works without a webhook).
+4. Fund a wallet from the app; pay with a Paystack test card. Check `GET /api/admin/reconciliation` afterwards.
+
+Going live: swap to `sk_live_...`, set `NODE_ENV=production` (which refuses the mock gateway). Check CBN rules for holding customer funds first.

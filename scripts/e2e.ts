@@ -329,6 +329,9 @@ async function main() {
   check('admin user search', users.status === 200 && users.body.total >= 1, users.body);
   const txs = await call('GET', '/api/admin/transactions?status=successful', { token: adminToken });
   check('admin transaction list', txs.status === 200, txs.body);
+  const recon = await call('GET', '/api/admin/reconciliation', { token: adminToken });
+  check('ledger reconciles: every wallet balance equals its transaction history', recon.status === 200 && recon.body.reconciliation.balanced === true, recon.body?.reconciliation?.mismatches);
+  check('reconciliation is admin-only', (await call('GET', '/api/admin/reconciliation', { token })).status === 403);
   const logs = await call('GET', '/api/admin/audit-logs', { token: adminToken });
   check('admin audit log has entries', logs.status === 200 && logs.body.total > 0, logs.body);
 

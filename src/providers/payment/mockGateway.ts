@@ -8,6 +8,7 @@ export function signWebhookPayload(rawBody: string): string {
 
 export const mockPaymentGateway: PaymentGateway = {
   name: 'mock-gateway',
+  signatureHeader: 'x-webhook-signature',
 
   async initialize(input: InitializeFundingInput): Promise<InitializeFundingResult> {
     const accessCode = `ac_${input.reference.toLowerCase()}`;
@@ -27,7 +28,7 @@ export const mockPaymentGateway: PaymentGateway = {
     return timingSafeEqual(a, b);
   },
 
-  parseWebhookEvent(rawBody: string): WebhookEvent {
+  parseWebhookEvent(rawBody: string): WebhookEvent | null {
     const payload = JSON.parse(rawBody) as { reference: string; status: 'success' | 'failed'; amountKobo: number };
     return payload;
   },

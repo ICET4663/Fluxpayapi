@@ -8,3 +8,7 @@ export const mockCompleteSchema = z.object({
   reference: z.string().min(3),
   outcome: z.enum(['success', 'failed']).default('success'),
 });
+
+export const verifyFundingSchema = z.object({
+  reference: z.string().min(3),
+});

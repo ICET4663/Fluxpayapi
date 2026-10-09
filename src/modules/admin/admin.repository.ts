@@ -180,3 +180,51 @@ export async function listAuditLogsAdmin(options: { limit: number; offset: numbe
   );
   return { items: rows, total: totalRow?.count ?? 0 };
 }
+
+export interface ReconciliationReport {
+  totalWalletBalanceKobo: number;
+  totalFundedKobo: number;
+  totalSpentKobo: number;
+  inFlightKobo: number;
+  mismatches: { walletId: string; userId: string; balanceKobo: number; expectedKobo: number }[];
+}
+
+/**
+ * Proves the ledger and the balances agree. A wallet's balance must equal
+ *   credits that succeeded  -  debits that succeeded or are still processing
+ * (failed debits were refunded, so they net to zero). Any wallet where that is false is listed.
+ */
+export async function getReconciliationReport(): Promise<ReconciliationReport> {
+  const totals = await queryOne<{ wallets: number; funded: number; spent: number; in_flight: number }>(
+    `select
+       (select coalesce(sum(balance_kobo), 0)::bigint from wallets) as wallets,
+       coalesce(sum(amount_kobo) filter (where category = 'wallet_funding' and status = 'successful'), 0)::bigint as funded,
+       coalesce(sum(amount_kobo) filter (where type = 'debit' and status = 'successful'), 0)::bigint as spent,
+       coalesce(sum(amount_kobo) filter (where type = 'debit' and status = 'processing'), 0)::bigint as in_flight
+     from transactions`,
+  );
+
+  const rows = await query<{ wallet_id: string; user_id: string; balance_kobo: number; expected_kobo: number }>(
+    `select w.id as wallet_id, w.user_id, w.balance_kobo,
+            coalesce(sum(case
+              when t.type = 'credit' and t.status = 'successful' then t.amount_kobo
+              when t.type = 'debit' and t.status in ('processing', 'successful') then -t.amount_kobo
+              else 0 end), 0)::bigint as expected_kobo
+       from wallets w
+       left join transactions t on t.wallet_id = w.id
+      group by w.id
+     having w.balance_kobo <> coalesce(sum(case
+              when t.type = 'credit' and t.status = 'successful' then t.amount_kobo
+              when t.type = 'debit' and t.status in ('processing', 'successful') then -t.amount_kobo
+              else 0 end), 0)
+      limit 50`,
+  );
+
+  return {
+    totalWalletBalanceKobo: totals?.wallets ?? 0,
+    totalFundedKobo: totals?.funded ?? 0,
+    totalSpentKobo: totals?.spent ?? 0,
+    inFlightKobo: totals?.in_flight ?? 0,
+    mismatches: rows.map((r) => ({ walletId: r.wallet_id, userId: r.user_id, balanceKobo: r.balance_kobo, expectedKobo: r.expected_kobo })),
+  };
+}

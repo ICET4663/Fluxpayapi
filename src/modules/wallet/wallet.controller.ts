@@ -4,8 +4,10 @@ import { asyncHandler } from '../../utils/asyncHandler.ts';
 import { AppError } from '../../utils/AppError.ts';
 import { koboToNaira } from '../../utils/money.ts';
 import { mockPaymentGateway } from '../../providers/payment/mockGateway.ts';
+import { paymentGateway } from '../../providers/payment/index.ts';
+import { recordAudit } from '../../lib/audit.ts';
 import { getWalletByUserIdOrThrow } from './wallet.repository.ts';
-import { buildMockWebhookCall, initializeWalletFunding, settleWalletFunding } from './wallet.service.ts';
+import { buildMockWebhookCall, initializeWalletFunding, settleWalletFunding, verifyWalletFunding } from './wallet.service.ts';
 import { getUserTransactionByReference } from '../transactions/transactions.repository.ts';
 import { serializeTransaction } from '../transactions/transactions.controller.ts';
 
@@ -44,23 +46,43 @@ export const mockCheckoutInfo = asyncHandler(async (req: Request, res: Response)
 export const mockComplete = asyncHandler(async (req: Request, res: Response) => {
   const tx = await getUserTransactionByReference(req.user!.id, req.body.reference);
   if (!tx) throw AppError.notFound('Unknown transaction reference');
+  // A top-up that went to a real gateway must never be completable through the fake checkout.
+  if (tx.provider !== mockPaymentGateway.name) throw AppError.badRequest('This payment was not made through the mock gateway');
 
   const { rawBody, signature } = buildMockWebhookCall(tx.reference, req.body.outcome, tx.amountKobo);
   if (!mockPaymentGateway.verifySignature(rawBody, signature)) {
     throw AppError.badRequest('Signature verification failed');
   }
-  const settled = await settleWalletFunding(mockPaymentGateway.parseWebhookEvent(rawBody));
+  const event = mockPaymentGateway.parseWebhookEvent(rawBody);
+  if (!event) throw AppError.badRequest('Unreadable mock event');
+  const settled = await settleWalletFunding(event);
+  res.json({ transaction: serializeTransaction(settled) });
+});
+
+/** Called by the frontend when the user returns from checkout, in case the webhook has not landed yet. */
+export const verifyFunding = asyncHandler(async (req: Request, res: Response) => {
+  const settled = await verifyWalletFunding(req.user!.id, req.body.reference);
   res.json({ transaction: serializeTransaction(settled) });
 });
 
 export const webhook = asyncHandler(async (req: Request, res: Response) => {
-  const signature = req.headers['x-webhook-signature'] as string | undefined;
+  const signature = req.headers[paymentGateway.signatureHeader] as string | undefined;
   const rawBody = req.rawBody ?? JSON.stringify(req.body);
 
-  if (!mockPaymentGateway.verifySignature(rawBody, signature)) {
+  if (!paymentGateway.verifySignature(rawBody, signature)) {
     throw AppError.unauthorized('Invalid webhook signature');
   }
 
-  await settleWalletFunding(mockPaymentGateway.parseWebhookEvent(rawBody));
+  const event = paymentGateway.parseWebhookEvent(rawBody);
+  if (event) {
+    try {
+      await settleWalletFunding(event);
+    } catch (err) {
+      // An unknown reference (e.g. a charge from another product on the same Paystack account) is not ours to settle.
+      // Answer 200 anyway so the gateway does not retry it forever; real failures still surface as errors.
+      if (!(err instanceof AppError && err.statusCode === 404)) throw err;
+      recordAudit('webhook_unknown_reference', null, req.ip, { reference: event.reference });
+    }
+  }
   res.status(200).json({ received: true });
 });

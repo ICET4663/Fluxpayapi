@@ -39,6 +39,10 @@ const schema = z.object({
   ENABLE_MOCK_PAYMENTS: bool.default(isProd ? 'false' : 'true'),
   DATABASE_SSL: bool.default('true'),
   DISABLE_RATE_LIMITS: bool.default('false'),
+  PAYMENT_PROVIDER: z.enum(['mock', 'paystack']).default('mock'),
+  PAYSTACK_SECRET_KEY: z.string().min(20).optional(),
+  // Where Paystack sends the user after paying. Defaults to the wallet page of the first allowed frontend origin.
+  PAYSTACK_CALLBACK_URL: z.string().url().optional(),
 });
 
 const parsed = schema.safeParse(raw);
@@ -49,6 +53,16 @@ if (!parsed.success) {
 }
 
 const e = parsed.data;
+
+if (e.PAYMENT_PROVIDER === 'paystack' && !e.PAYSTACK_SECRET_KEY) {
+  console.error('PAYSTACK_SECRET_KEY is required when PAYMENT_PROVIDER=paystack.');
+  process.exit(1);
+}
+
+if (isProd && e.PAYMENT_PROVIDER === 'mock') {
+  console.error('PAYMENT_PROVIDER=mock must not be used in production. Set PAYMENT_PROVIDER=paystack.');
+  process.exit(1);
+}
 
 if (isProd && (e.ENABLE_MOCK_PAYMENTS || e.DISABLE_RATE_LIMITS)) {
   console.error('ENABLE_MOCK_PAYMENTS and DISABLE_RATE_LIMITS must not be true in production.');
@@ -70,4 +84,7 @@ export const env = {
   trustProxy: e.TRUST_PROXY,
   enableMockPayments: e.ENABLE_MOCK_PAYMENTS,
   disableRateLimits: e.DISABLE_RATE_LIMITS,
+  paymentProvider: e.PAYMENT_PROVIDER,
+  paystackSecretKey: e.PAYSTACK_SECRET_KEY,
+  paystackCallbackUrl: e.PAYSTACK_CALLBACK_URL,
 };

@@ -86,7 +86,10 @@ PIN is exactly 4 digits.
 - `GET /api/wallet` → `{ wallet: { balance, currency } }`
 - `POST /api/wallet/fund/initialize` `{ amount }` (≤ 1,000,000) → `201 { funding: { reference, authorizationUrl, accessCode } }`
 - Dev only (`ENABLE_MOCK_PAYMENTS=true`): `POST /api/wallet/fund/mock-complete` `{ reference, outcome: "success"|"failed" }` → `{ transaction }`. Stands in for the payment page; owner-only.
-- `POST /api/wallet/fund/webhook` — for the payment gateway (HMAC `x-webhook-signature`), not the frontend.
+- `POST /api/wallet/fund/verify` `{ reference }` → `{ transaction }`. Call when the user returns from checkout (Paystack redirects to `<frontend>/dashboard/wallet?reference=...`). Asks the gateway for the final state and credits the wallet if paid; harmless to repeat.
+- `POST /api/wallet/fund/webhook` — for the payment gateway (HMAC signature header: `x-paystack-signature` for Paystack, `x-webhook-signature` for the mock), not the frontend. Point Paystack's dashboard webhook URL at `https://<api-host>/api/wallet/fund/webhook`.
+
+With `PAYMENT_PROVIDER=paystack`, `authorizationUrl` is Paystack's hosted checkout: redirect the browser to it.
 
 ## Services
 
@@ -120,6 +123,6 @@ PIN is exactly 4 digits.
 
 ## Admin 🔒 (role `admin`)
 
-`GET /api/admin/stats` · `GET /api/admin/users?search=&limit=&offset=` · `GET /api/admin/transactions?status=&category=&search=` · `GET /api/admin/audit-logs`
+`GET /api/admin/stats` · `GET /api/admin/users?search=&limit=&offset=` · `GET /api/admin/transactions?status=&category=&search=` · `GET /api/admin/audit-logs` · `GET /api/admin/reconciliation` (do wallet balances match the ledger? `balanced: false` lists the offending wallets)
 
 Make a user admin: `npm run promote-admin -- email@example.com`.

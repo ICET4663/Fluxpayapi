@@ -3,6 +3,7 @@ import { asyncHandler } from '../../utils/asyncHandler.ts';
 import { koboToNaira } from '../../utils/money.ts';
 import {
   getDashboardStats,
+  getReconciliationReport,
   listAuditLogsAdmin,
   listTransactionsAdmin,
   listUsersAdmin,
@@ -95,5 +96,24 @@ export const getAuditLogs = asyncHandler(async (req: Request, res: Response) => 
     total,
     limit,
     offset,
+  });
+});
+
+export const getReconciliation = asyncHandler(async (_req: Request, res: Response) => {
+  const report = await getReconciliationReport();
+  res.json({
+    reconciliation: {
+      totalWalletBalance: koboToNaira(report.totalWalletBalanceKobo),
+      totalFunded: koboToNaira(report.totalFundedKobo),
+      totalSpent: koboToNaira(report.totalSpentKobo),
+      inFlight: koboToNaira(report.inFlightKobo),
+      balanced: report.mismatches.length === 0,
+      mismatches: report.mismatches.map((m) => ({
+        walletId: m.walletId,
+        userId: m.userId,
+        balance: koboToNaira(m.balanceKobo),
+        expected: koboToNaira(m.expectedKobo),
+      })),
+    },
   });
 });
