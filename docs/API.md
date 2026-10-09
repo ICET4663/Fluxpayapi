@@ -113,6 +113,7 @@ With `PAYMENT_PROVIDER=paystack`, `authorizationUrl` is Paystack's hosted checko
 
 - `GET /api/transactions?type=credit|debit&category=airtime|data|electricity|tv|wallet_funding&limit=20&offset=0` → `{ transactions, total, limit, offset }`
 - `GET /api/transactions/:reference` → `{ transaction }`
+- `GET /api/transactions/summary?month=2026-10` (month optional, defaults to now, Lagos time) → `{ summary: { month, label, totalSpent, previousMonthSpent, changePercent, dailyAverage, weeks: [{label:"W1",amount}…5], byCategory: [{category, amount}] } }`. Only completed bill payments count (airtime, data, electricity, tv). `changePercent` is null when last month had no spending.
 
 `transaction` = `{ id, reference, title, subtitle, amount, fee, type, category, status, createdAt }`
 

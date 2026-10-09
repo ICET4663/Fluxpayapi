@@ -120,3 +120,48 @@ export async function listTransactions(options: ListTransactionsOptions): Promis
   );
   return { items: rows.map(mapTransaction), total: totalRow?.count ?? 0 };
 }
+
+const SPEND_CATEGORIES = ['airtime', 'data', 'electricity', 'tv'];
+
+export interface SpendingBreakdown {
+  /** Kobo spent per week of the month (days 1-7 = W1 ... 29+ = W5), indexed 0..4. */
+  weeks: number[];
+  byCategory: Record<string, number>;
+  totalKobo: number;
+  previousMonthKobo: number;
+}
+
+/**
+ * What the user spent on bills in the month starting `monthStart` (YYYY-MM-01, Lagos local time).
+ * Only completed bill payments count: failed ones were refunded, wallet top-ups are not spending.
+ */
+export async function getSpendingBreakdown(userId: string, monthStart: string): Promise<SpendingBreakdown> {
+  const rows = await query<{ week: number; category: string; total: number }>(
+    `select least(5, ((extract(day from (created_at at time zone 'Africa/Lagos'))::int - 1) / 7) + 1)::int as week,
+            category, sum(amount_kobo)::bigint as total
+       from transactions
+      where user_id = $1 and type = 'debit' and status = 'successful' and category = any($3::text[])
+        and (created_at at time zone 'Africa/Lagos') >= $2::timestamp
+        and (created_at at time zone 'Africa/Lagos') <  $2::timestamp + interval '1 month'
+      group by 1, 2`,
+    [userId, monthStart, SPEND_CATEGORIES],
+  );
+  const previous = await queryOne<{ total: number }>(
+    `select coalesce(sum(amount_kobo), 0)::bigint as total
+       from transactions
+      where user_id = $1 and type = 'debit' and status = 'successful' and category = any($3::text[])
+        and (created_at at time zone 'Africa/Lagos') >= $2::timestamp - interval '1 month'
+        and (created_at at time zone 'Africa/Lagos') <  $2::timestamp`,
+    [userId, monthStart, SPEND_CATEGORIES],
+  );
+
+  const weeks = [0, 0, 0, 0, 0];
+  const byCategory: Record<string, number> = {};
+  let totalKobo = 0;
+  for (const r of rows) {
+    weeks[r.week - 1] += r.total;
+    byCategory[r.category] = (byCategory[r.category] ?? 0) + r.total;
+    totalKobo += r.total;
+  }
+  return { weeks, byCategory, totalKobo, previousMonthKobo: previous?.total ?? 0 };
+}

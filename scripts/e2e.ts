@@ -299,6 +299,19 @@ async function main() {
   check('mark all read', readAll.status === 200);
   check('unread count is zero afterwards', (await call('GET', '/api/notifications', { token })).body.unread === 0);
 
+  section('Spending summary');
+  const sum = await call('GET', '/api/transactions/summary', { token });
+  const sm = sum.body?.summary;
+  check('summary returns this month', sum.status === 200 && /^\d{4}-\d{2}$/.test(sm?.month ?? ''), sum.body);
+  check('summary counts completed bill payments', sm?.totalSpent >= 4850, sm);
+  check('weekly buckets add up to the total', sm?.weeks?.length === 5 && Math.abs(sm.weeks.reduce((a: number, w: { amount: number }) => a + w.amount, 0) - sm.totalSpent) < 0.01, sm?.weeks);
+  check('category breakdown includes airtime and excludes wallet funding', sm?.byCategory?.some((c: { category: string }) => c.category === 'airtime') && !sm.byCategory.some((c: { category: string }) => c.category === 'wallet_funding'), sm?.byCategory);
+  check('daily average is positive', sm?.dailyAverage > 0, sm?.dailyAverage);
+  const sumOld = await call('GET', '/api/transactions/summary?month=2020-01', { token });
+  check('an empty month is all zeros with no comparison', sumOld.status === 200 && sumOld.body.summary.totalSpent === 0 && sumOld.body.summary.changePercent === null, sumOld.body);
+  check('bad month format -> 400', (await call('GET', '/api/transactions/summary?month=october', { token })).status === 400);
+  check("summary does not collide with transaction lookup", (await call('GET', '/api/transactions/summary', {})).status === 401);
+
   // -------------------------------------------------------------------------------------------------------------
   section('Bank withdrawals (mock gateway)');
   const topUp = await call('POST', '/api/wallet/fund/initialize', { token, body: { amount: 20_000 } });
